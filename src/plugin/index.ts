@@ -10,8 +10,18 @@
  *   import.meta.console?.error('boom')           // optional chain
  *   import.meta.console.log?.('hello')           // optional call
  *
- * The `filename` baked into each call is the source file's basename, not
- * the absolute path, so the runtime log line stays short.
+ * Hot-path optimization:
+ *
+ *   Most files in a typical bundle don't reference `import.meta.console`.
+ *   We register a single `Program.enter` visitor and short-circuit on the
+ *   raw source — if the substring `import.meta.console` is absent, we
+ *   return immediately and Babel never traverses any further on our
+ *   behalf. Matching files run a one-shot `programPath.traverse(...)`
+ *   that visits CallExpression/OptionalCallExpression nodes scoped to
+ *   this plugin alone.
+ *
+ *   Net effect: non-matching files cost one `String.includes` per file;
+ *   matching files run the original transform exactly once.
  */
 import { basename } from 'node:path';
 import type { NodePath, PluginObj, PluginPass } from '@babel/core';
@@ -31,42 +41,7 @@ export type PluginOptions = {
 
 const DEFAULT_RUNTIME = 'im.console/runtime';
 const RUNTIME_LOCAL_HINT = '_imConsoleRuntime';
-
-const isImportMeta = (node: BabelTypes.Node): boolean => (
-	node.type === 'MetaProperty'
-	&& node.meta.name === 'import'
-	&& node.property.name === 'meta'
-);
-
-/** Matches `import.meta.console` and `import.meta?.console`. */
-const isImportMetaConsole = (node: BabelTypes.Node): boolean => (
-	(node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression')
-	&& !node.computed
-	&& node.property.type === 'Identifier'
-	&& node.property.name === 'console'
-	&& isImportMeta(node.object)
-);
-
-type CalleeShape =
-	| { kind: 'method'; method: string }
-	| { kind: 'callable' };
-
-/** Inspect a CallExpression's callee and decide whether it targets
- * `import.meta.console.<method>` or `import.meta.console` directly. */
-const classifyCallee = (callee: BabelTypes.Node): CalleeShape | undefined => {
-	if (isImportMetaConsole(callee)) {
-		return { kind: 'callable' };
-	}
-	if (
-		(callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression')
-		&& !callee.computed
-		&& callee.property.type === 'Identifier'
-		&& isImportMetaConsole(callee.object)
-	) {
-		return { kind: 'method', method: callee.property.name };
-	}
-	return;
-};
+const NEEDLE = 'import.meta.console';
 
 const resolveFilename = (state: PluginPass, override: string | undefined): string | undefined => {
 	if (override !== undefined && override !== '') {
@@ -79,98 +54,129 @@ const resolveFilename = (state: PluginPass, override: string | undefined): strin
 	return basename(filename);
 };
 
-type State = PluginPass & {
-	imcFilename?: string;
-	imcRuntimeLocal?: string;
-	imcMatched?: boolean;
-};
-
 type BabelApi = { types: typeof BabelTypes };
 
-const plugin = ({ types: t }: BabelApi): PluginObj<State> => ({
+const isImportMetaConsole = (node: BabelTypes.Node): boolean => {
+	if (node.type !== 'MemberExpression' && node.type !== 'OptionalMemberExpression') {
+		return false;
+	}
+	if (node.computed || node.property.type !== 'Identifier' || node.property.name !== 'console') {
+		return false;
+	}
+	const obj = node.object;
+	return (
+		obj.type === 'MetaProperty'
+		&& obj.meta.name === 'import'
+		&& obj.property.name === 'meta'
+	);
+};
+
+/** Returns the console method name being called (`'log'`, `'warn'`, etc.),
+ * or `undefined` if the call site doesn't target `import.meta.console`. The
+ * callable shorthand `import.meta.console(...)` returns `'log'`. */
+const classifyMethod = (callee: BabelTypes.Node): string | undefined => {
+	if (isImportMetaConsole(callee)) {
+		return 'log';
+	}
+	if (
+		(callee.type !== 'MemberExpression' && callee.type !== 'OptionalMemberExpression')
+		|| callee.computed
+		|| callee.property.type !== 'Identifier'
+		|| !isImportMetaConsole(callee.object)
+	) {
+		return;
+	}
+	return callee.property.name;
+};
+
+const plugin = ({ types: t }: BabelApi): PluginObj<PluginPass> => ({
 	name: 'transform-import-meta-console',
 
 	visitor: {
-		Program: {
-			enter(programPath, state): void {
-				const options = (state.opts as PluginOptions | undefined) ?? {};
-				const filename = resolveFilename(state, options.filename);
-				if (filename === undefined) {
+		Program(programPath, state): void {
+			// Cheap substring check on the raw source — bail out before
+			// touching the AST for files that don't reference the needle.
+			const source = state.file.code;
+			if (typeof source !== 'string' || !source.includes(NEEDLE)) {
+				return;
+			}
+
+			const options = (state.opts as PluginOptions | undefined) ?? {};
+			const filename = resolveFilename(state, options.filename);
+			if (filename === undefined) {
+				return;
+			}
+
+			let runtimeLocal: string | undefined;
+			let matched = false;
+
+			const rewriteCall = (
+				callPath: NodePath<BabelTypes.CallExpression>
+					| NodePath<BabelTypes.OptionalCallExpression>,
+			): void => {
+				const { node } = callPath;
+				const method = classifyMethod(node.callee);
+				if (method === undefined) {
 					return;
 				}
-				state.imcFilename = filename;
-				state.imcRuntimeLocal = programPath.scope.generateUid(RUNTIME_LOCAL_HINT);
-				state.imcMatched = false;
-			},
-			exit(programPath, state): void {
-				if (state.imcMatched !== true || state.imcRuntimeLocal === undefined) {
+				const { loc } = node;
+				if (!loc) {
 					return;
 				}
-				const options = (state.opts as PluginOptions | undefined) ?? {};
-				const moduleType = options.module ?? 'esm';
-				const specifier = options.runtimeSpecifier ?? DEFAULT_RUNTIME;
-				const local = t.identifier(state.imcRuntimeLocal);
-				const specifierLiteral = t.stringLiteral(specifier);
-				const declaration = moduleType === 'cjs'
-					? t.variableDeclaration('var', [
-						t.variableDeclarator(
-							local,
-							t.callExpression(t.identifier('require'), [specifierLiteral]),
+
+				if (runtimeLocal === undefined) {
+					runtimeLocal = programPath.scope.generateUid(RUNTIME_LOCAL_HINT);
+				}
+
+				callPath.replaceWith(
+					t.callExpression(
+						t.memberExpression(
+							t.identifier(runtimeLocal),
+							t.identifier('__imConsole'),
 						),
-					])
-					: t.importDeclaration(
-						[t.importNamespaceSpecifier(local)],
-						specifierLiteral,
-					);
-				programPath.unshiftContainer('body', declaration);
-			},
-		},
+						[
+							t.stringLiteral(filename),
+							t.numericLiteral(loc.start.line),
+							t.numericLiteral(loc.start.column + 1),
+							t.stringLiteral(method),
+							...node.arguments,
+						],
+					),
+				);
+				matched = true;
+			};
 
-		CallExpression(callPath, state): void {
-			rewrite(t, callPath, state);
-		},
+			programPath.traverse({
+				CallExpression(callPath): void {
+					rewriteCall(callPath);
+				},
+				OptionalCallExpression(callPath): void {
+					rewriteCall(callPath);
+				},
+			});
 
-		OptionalCallExpression(callPath, state): void {
-			rewrite(t, callPath, state);
+			if (!matched || runtimeLocal === undefined) {
+				return;
+			}
+
+			const moduleType = options.module ?? 'esm';
+			const specifier = options.runtimeSpecifier ?? DEFAULT_RUNTIME;
+			const localId = t.identifier(runtimeLocal);
+			const specifierLiteral = t.stringLiteral(specifier);
+			const declaration = moduleType === 'cjs'
+				? t.variableDeclaration('var', [
+					t.variableDeclarator(
+						localId,
+						t.callExpression(t.identifier('require'), [specifierLiteral]),
+					),
+				])
+				: t.importDeclaration(
+					[t.importNamespaceSpecifier(localId)],
+					specifierLiteral,
+				);
+			programPath.unshiftContainer('body', declaration);
 		},
 	},
 });
-
-const rewrite = (
-	t: typeof BabelTypes,
-	callPath: NodePath<BabelTypes.CallExpression> | NodePath<BabelTypes.OptionalCallExpression>,
-	state: State,
-): void => {
-	const { node } = callPath;
-	const shape = classifyCallee(node.callee);
-	if (shape === undefined) {
-		return;
-	}
-	const filename = state.imcFilename;
-	const local = state.imcRuntimeLocal;
-	if (filename === undefined || local === undefined) {
-		return;
-	}
-	const { loc } = node;
-	if (!loc) {
-		return;
-	}
-
-	const method = shape.kind === 'method' ? shape.method : 'log';
-
-	const newCall = t.callExpression(
-		t.memberExpression(t.identifier(local), t.identifier('__imConsole')),
-		[
-			t.stringLiteral(filename),
-			t.numericLiteral(loc.start.line),
-			t.numericLiteral(loc.start.column + 1),
-			t.stringLiteral(method),
-			...node.arguments,
-		],
-	);
-
-	callPath.replaceWith(newCall);
-	state.imcMatched = true;
-};
 
 export default plugin;

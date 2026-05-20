@@ -1,49 +1,32 @@
 {
-  "name": "imconsole",
-  "version": "0.0.0",
-  "description": "import.meta.console",
+  "name": "im.console",
+  "version": "0.0.0-alpha.0",
+  "description": "import.meta.console — console.* with file:line:col baked into every call",
   "keywords": [
-    "debug",
+    "console",
     "import.meta",
     "logger",
-    "esm",
-    "cjs",
-    "commonjs",
-    "loader",
-    "bun"
+    "babel-plugin",
+    "react-native"
   ],
   "license": "MIT",
-  "repository": "leonsilicon/im.debug",
+  "repository": "leonsilicon/im.console",
   "author": {
     "name": "Leon Si",
     "email": "leon@leonsilicon.com"
   },
   "files": [
-    "bun.js",
     "dist",
     "src/types"
   ],
   "type": "module",
   "scripts": {
-    "build": "tsdown && node ./scripts/copy-bun.mjs",
+    "build": "tsdown",
     "type-check": "tsc --noEmit",
     "lint": "lintroll"
   },
   "exports": {
     "./package.json": "./package.json",
-    "./cjs": {
-      "types": "./dist/cjs/index.d.cts",
-      "default": "./dist/cjs/index.cjs"
-    },
-    "./node": {
-      "types": "./dist/node/index.d.mts",
-      "default": "./dist/node/index.mjs"
-    },
-    "./bun": {
-      "types": "./dist/bun/index.d.mts",
-      "default": "./dist/bun/index.mjs"
-    },
-    "./bun.js": "./bun.js",
     "./types": "./src/types/index.d.ts",
     "./plugin": {
       "import": {
@@ -64,32 +47,14 @@
         "types": "./dist/runtime/index.d.cts",
         "default": "./dist/runtime/index.cjs"
       }
-    },
-    "./runtime-react-native": {
-      "import": {
-        "types": "./dist/runtime-react-native/index.d.ts",
-        "default": "./dist/runtime-react-native/index.js"
-      },
-      "require": {
-        "types": "./dist/runtime-react-native/index.d.cts",
-        "default": "./dist/runtime-react-native/index.cjs"
-      }
     }
   },
   "engines": {
     "node": ">=18.19.0"
   },
-  "dependencies": {
-    "@babel/parser": "^7.29.3",
-    "@babel/types": "^7.29.0",
-    "magic-string": "^0.30.21",
-    "pathe": "^2.0.3"
-  },
   "peerDependencies": {
     "@babel/core": "^7.10.0",
-    "@types/babel__core": "^7.20.5",
-    "@types/debug": "^4.1.12",
-    "debug": "^4.0.0"
+    "@types/babel__core": "^7.20.5"
   },
   "peerDependenciesMeta": {
     "@babel/core": {
@@ -97,18 +62,13 @@
     },
     "@types/babel__core": {
       "optional": true
-    },
-    "@types/debug": {
-      "optional": true
     }
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
     "@types/babel__core": "^7.20.5",
-    "@types/debug": "^4.1.12",
     "@types/node": "^22.15.29",
     "clean-pkg-json": "^1.2.0",
-    "debug": "^4.4.0",
     "lintroll": "^1.8.1",
     "tsdown": "^0.22.0",
     "typescript": "^5.5.2"

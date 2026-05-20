@@ -1,69 +1,120 @@
-import createDebug from 'debug';
-import { basename } from 'pathe';
+/**
+ * Runtime for `import.meta.console.*`.
+ *
+ * The babel plugin rewrites every call like
+ *
+ *   import.meta.console.log('hello', user)
+ *
+ * into
+ *
+ *   __imConsoleRuntime.__imConsole('file.tsx', 12, 7, 'log', 'hello', user)
+ *
+ * and this runtime forwards the arguments to `console.log` with a
+ * `[file.tsx:12:7]` prefix prepended.
+ *
+ * Method routing:
+ *   - log, warn, error, info, debug, trace, group, groupCollapsed
+ *       → prefix the first argument with `[file:line:col]`
+ *   - assert
+ *       → keep condition as the first argument, prefix the message
+ *   - dir, table, time, timeEnd, timeLog, count, countReset, groupEnd, clear
+ *       → forward arguments verbatim (the location prefix would corrupt
+ *         label-based methods like time/timeEnd or skew dir/table output)
+ *
+ * `console` is available in every JS runtime (Node, Hermes, browsers,
+ * Workers), so the runtime has no environment dependencies. If a method
+ * isn't present on the host's `console`, the runtime silently falls back
+ * to `console.log`.
+ */
 
-type DebugInstance = ((...args: unknown[]) => void) & { enabled: boolean };
+type AnyConsole = Record<string, ((...args: unknown[]) => void) | undefined>;
 
-type DebugFactory = (namespace: string) => DebugInstance;
+const PASS_THROUGH = new Set<string>([
+	'clear',
+	'groupEnd',
+	'time',
+	'timeEnd',
+	'timeLog',
+	'count',
+	'countReset',
+	'dir',
+	'dirxml',
+	'table',
+	'profile',
+	'profileEnd',
+	'timeStamp',
+]);
 
-const factory = createDebug as unknown as DebugFactory;
-
-const instanceCache = new Map<string, DebugInstance>();
-
-const fileUrlToPath = (url: string): string => {
-	let pathname = url.slice('file://'.length);
-	const slash = pathname.indexOf('/');
-	if (slash > 0) {
-		pathname = pathname.slice(slash);
+const callConsole = (method: string, args: readonly unknown[]): void => {
+	const host = console as unknown as AnyConsole;
+	const fn = host[method] ?? host.log;
+	if (fn === undefined) {
+		return;
 	}
-	return pathname.replace(/%([\da-f]{2})/gi, (_, hex: string) => (
-		String.fromCharCode(Number.parseInt(hex, 16))
-	));
+	fn.apply(console, args as unknown[]);
 };
 
-const urlToNamespace = (url: string): string => {
-	const raw = url.startsWith('file://') ? fileUrlToPath(url) : url;
-	return basename(raw) || raw;
+const prefixed = (method: string, args: readonly unknown[], location: string): void => {
+	const host = console as unknown as AnyConsole;
+	const fn = host[method] ?? host.log;
+	if (fn === undefined) {
+		return;
+	}
+	if (args.length === 0) {
+		fn.call(console, location);
+		return;
+	}
+	const [first, ...rest] = args;
+	if (typeof first === 'string') {
+		fn.call(console, `${location} ${first}`, ...rest);
+	} else {
+		fn.call(console, location, first, ...rest);
+	}
 };
 
-const getInstance = (url: string): DebugInstance => {
-	let instance = instanceCache.get(url);
-	if (!instance) {
-		instance = factory(urlToNamespace(url));
-		instanceCache.set(url, instance);
+const assertWithLocation = (args: readonly unknown[], location: string): void => {
+	const host = console as unknown as AnyConsole;
+	const fn = host.assert ?? host.log;
+	if (fn === undefined) {
+		return;
 	}
-	return instance;
+	if (args.length === 0) {
+		fn.call(console, false, location);
+		return;
+	}
+	const [condition, ...rest] = args;
+	if (rest.length === 0) {
+		fn.call(console, condition, location);
+		return;
+	}
+	const [first, ...tail] = rest;
+	if (typeof first === 'string') {
+		fn.call(console, condition, `${location} ${first}`, ...tail);
+	} else {
+		fn.call(console, condition, location, first, ...tail);
+	}
 };
 
 /**
- * Called by code transformed from `import.meta.debug?.(...)`.
- *
- * The transform injects the source URL plus the line and column of the call
- * site. The first message argument is prefixed with `[file:line:col]` so the
- * location is visible even when the consumer passes a non-string value.
+ * Emitted by the babel plugin at every `import.meta.console.<method>(...)`
+ * call site. `filename` is just the file's basename (the plugin strips the
+ * directory) so the log line stays short.
  */
-export const __imDotDebug = (
-	url: string,
+export const __imConsole = (
+	filename: string,
 	line: number,
 	column: number,
+	method: string,
 	...args: unknown[]
 ): void => {
-	const debug = getInstance(url);
-	if (!debug.enabled) {
+	if (PASS_THROUGH.has(method)) {
+		callConsole(method, args);
 		return;
 	}
-
-	const location = `[${urlToNamespace(url)}:${line}:${column}]`;
-	if (args.length === 0) {
-		debug(location);
+	const location = `[${filename}:${line}:${column}]`;
+	if (method === 'assert') {
+		assertWithLocation(args, location);
 		return;
 	}
-
-	const [first, ...rest] = args;
-	if (typeof first === 'string') {
-		debug(`${location} ${first}`, ...rest);
-	} else {
-		debug(location, first, ...rest);
-	}
+	prefixed(method, args, location);
 };
-
-export { factory as debug };

@@ -1,6 +1,6 @@
 {
   "name": "im.console",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "import.meta.console — console.* with file:line:col baked into every call",
   "keywords": [
     "console",
@@ -27,7 +27,10 @@
   },
   "exports": {
     "./package.json": "./package.json",
-    "./types": "./src/types/index.d.ts",
+    "./types": {
+      "types": "./src/types/index.d.ts",
+      "default": "./src/types/index.d.ts"
+    },
     "./plugin": {
       "import": {
         "types": "./dist/plugin/index.d.mts",
@@ -47,6 +50,13 @@
         "types": "./dist/runtime/index.d.cts",
         "default": "./dist/runtime/index.cjs"
       }
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "types": ["./src/types/index.d.ts"],
+      "plugin": ["./dist/plugin/index.d.mts"],
+      "runtime": ["./dist/runtime/index.d.ts"]
     }
   },
   "engines": {

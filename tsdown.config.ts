@@ -27,6 +27,12 @@ export default defineConfig([
 		dts: true,
 	},
 	{
+		entry: { 'runtime-react-native/index': 'src/runtime-react-native/index.ts' },
+		format: ['esm', 'cjs'],
+		platform: 'neutral',
+		dts: true,
+	},
+	{
 		entry: { 'plugin/index': 'src/plugin/index.ts' },
 		format: ['esm', 'cjs'],
 		platform: 'node',

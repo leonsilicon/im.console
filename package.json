@@ -1,7 +1,7 @@
 {
-  "name": "im.debug",
-  "version": "0.0.4",
-  "description": "import.meta.debug — zero-config debug() calls with file, line, and column auto-baked in",
+  "name": "imconsole",
+  "version": "0.0.0",
+  "description": "import.meta.console",
   "keywords": [
     "debug",
     "import.meta",
@@ -63,6 +63,16 @@
       "require": {
         "types": "./dist/runtime/index.d.cts",
         "default": "./dist/runtime/index.cjs"
+      }
+    },
+    "./runtime-react-native": {
+      "import": {
+        "types": "./dist/runtime-react-native/index.d.ts",
+        "default": "./dist/runtime-react-native/index.js"
+      },
+      "require": {
+        "types": "./dist/runtime-react-native/index.d.cts",
+        "default": "./dist/runtime-react-native/index.cjs"
       }
     }
   },

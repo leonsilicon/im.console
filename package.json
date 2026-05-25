@@ -1,6 +1,6 @@
 {
   "name": "im.console",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "import.meta.console — console.* with file:line:col baked into every call",
   "keywords": [
     "console",

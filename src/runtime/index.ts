@@ -118,3 +118,48 @@ export const __imConsole = (
 	}
 	prefixed(method, args, location);
 };
+
+/**
+ * Emitted by the babel plugin when `import.meta.console.<method>` is used
+ * as a value rather than called directly (e.g. `const logger =
+ * import.meta.console.warn`). Returns a function bound to the location the
+ * reference was taken at — subsequent calls log with that same prefix,
+ * regardless of where they happen.
+ */
+export const __imConsoleBind = (
+	filename: string,
+	line: number,
+	column: number,
+	method: string,
+): ((...args: unknown[]) => void) => {
+	return (...args: unknown[]): void => {
+		__imConsole(filename, line, column, method, ...args);
+	};
+};
+
+/**
+ * Emitted by the babel plugin when `import.meta.console` itself is used as
+ * a value (e.g. `const c = import.meta.console`). Returns a callable object
+ * mirroring the `Console` surface, with every method bound to the location
+ * the reference was taken at. Calling the object directly is shorthand for
+ * `.log`, matching the call-site behavior.
+ */
+export const __imConsoleBindObject = (
+	filename: string,
+	line: number,
+	column: number,
+): ((...args: unknown[]) => void) & Record<string, (...args: unknown[]) => void> => {
+	const fn = ((...args: unknown[]): void => {
+		__imConsole(filename, line, column, 'log', ...args);
+	}) as ((...args: unknown[]) => void) & Record<string, (...args: unknown[]) => void>;
+	return new Proxy(fn, {
+		get(target, prop): unknown {
+			if (typeof prop !== 'string') {
+				return Reflect.get(target, prop);
+			}
+			return (...args: unknown[]): void => {
+				__imConsole(filename, line, column, prop, ...args);
+			};
+		},
+	});
+};

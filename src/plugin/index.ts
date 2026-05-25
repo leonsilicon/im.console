@@ -10,6 +10,10 @@
  *   import.meta.console?.error('boom')           // optional chain
  *   import.meta.console.log?.('hello')           // optional call
  *
+ *   // Value form — captures location where the reference is taken:
+ *   const logger = import.meta.console.warn
+ *   const c      = import.meta.console
+ *
  * Hot-path optimization:
  *
  *   Most files in a typical bundle don't reference `import.meta.console`.
@@ -110,6 +114,13 @@ const plugin = ({ types: t }: BabelApi): PluginObj<PluginPass> => ({
 			let runtimeLocal: string | undefined;
 			let matched = false;
 
+			const ensureRuntimeLocal = (): string => {
+				if (runtimeLocal === undefined) {
+					runtimeLocal = programPath.scope.generateUid(RUNTIME_LOCAL_HINT);
+				}
+				return runtimeLocal;
+			};
+
 			const rewriteCall = (
 				callPath: NodePath<BabelTypes.CallExpression>
 					| NodePath<BabelTypes.OptionalCallExpression>,
@@ -124,14 +135,12 @@ const plugin = ({ types: t }: BabelApi): PluginObj<PluginPass> => ({
 					return;
 				}
 
-				if (runtimeLocal === undefined) {
-					runtimeLocal = programPath.scope.generateUid(RUNTIME_LOCAL_HINT);
-				}
+				const local = ensureRuntimeLocal();
 
 				callPath.replaceWith(
 					t.callExpression(
 						t.memberExpression(
-							t.identifier(runtimeLocal),
+							t.identifier(local),
 							t.identifier('__imConsole'),
 						),
 						[
@@ -146,12 +155,83 @@ const plugin = ({ types: t }: BabelApi): PluginObj<PluginPass> => ({
 				matched = true;
 			};
 
+			const rewriteValue = (
+				memberPath: NodePath<BabelTypes.MemberExpression>
+					| NodePath<BabelTypes.OptionalMemberExpression>,
+			): void => {
+				const { node } = memberPath;
+				// `import.meta.console.<method>` as a value — emit __imConsoleBind.
+				if (
+					!node.computed
+					&& node.property.type === 'Identifier'
+					&& isImportMetaConsole(node.object)
+				) {
+					const { loc } = node;
+					if (!loc) {
+						return;
+					}
+					const local = ensureRuntimeLocal();
+					memberPath.replaceWith(
+						t.callExpression(
+							t.memberExpression(
+								t.identifier(local),
+								t.identifier('__imConsoleBind'),
+							),
+							[
+								t.stringLiteral(filename),
+								t.numericLiteral(loc.start.line),
+								t.numericLiteral(loc.start.column + 1),
+								t.stringLiteral(node.property.name),
+							],
+						),
+					);
+					matched = true;
+					return;
+				}
+				// Bare `import.meta.console` as a value — emit __imConsoleBindObject.
+				if (isImportMetaConsole(node)) {
+					const { loc } = node;
+					if (!loc) {
+						return;
+					}
+					const local = ensureRuntimeLocal();
+					memberPath.replaceWith(
+						t.callExpression(
+							t.memberExpression(
+								t.identifier(local),
+								t.identifier('__imConsoleBindObject'),
+							),
+							[
+								t.stringLiteral(filename),
+								t.numericLiteral(loc.start.line),
+								t.numericLiteral(loc.start.column + 1),
+							],
+						),
+					);
+					matched = true;
+				}
+			};
+
+			// First pass: rewrite calls. Replacing the whole call also
+			// consumes the inner `import.meta.console[.method]` node, so
+			// the value-form pass below only sees genuine value references.
 			programPath.traverse({
 				CallExpression(callPath): void {
 					rewriteCall(callPath);
 				},
 				OptionalCallExpression(callPath): void {
 					rewriteCall(callPath);
+				},
+			});
+
+			// Second pass: any surviving `import.meta.console[.method]`
+			// member expressions are value references — bind them.
+			programPath.traverse({
+				MemberExpression(memberPath): void {
+					rewriteValue(memberPath);
+				},
+				OptionalMemberExpression(memberPath): void {
+					rewriteValue(memberPath);
 				},
 			});
 

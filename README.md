@@ -26,6 +26,15 @@ directly callable as a shorthand for `.log`:
 import.meta.console('quick log')   // → console.log('[file.ts:1:1] quick log')
 ```
 
+You can also capture a reference and call it later. The location prefix is
+baked in where the reference is taken, not where it's called:
+
+```ts
+const logger = import.meta.console.warn   // location captured here
+const c      = import.meta.console        // ditto — `c.error(...)` uses this line
+arr.forEach(import.meta.console.log)
+```
+
 `import.meta.console.*` is non-optional by design — the babel plugin must be
 active for any file that uses it. Code without the plugin running will throw
 `TypeError: Cannot read property 'log' of undefined`.

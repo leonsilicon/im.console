@@ -23,7 +23,8 @@
   "scripts": {
     "build": "tsdown",
     "type-check": "tsc --noEmit",
-    "lint": "lintroll"
+    "lint": "lintroll",
+    "prepublishOnly": "npm run build"
   },
   "exports": {
     "./package.json": "./package.json",

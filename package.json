@@ -1,88 +1,116 @@
 {
-  "name": "im.console",
-  "version": "0.2.0",
-  "description": "import.meta.console — console.* with file:line:col baked into every call",
-  "keywords": [
-    "console",
-    "import.meta",
-    "logger",
-    "babel-plugin",
-    "react-native"
-  ],
-  "license": "MIT",
-  "repository": "leonsilicon/im.console",
-  "author": {
-    "name": "Leon Si",
-    "email": "leon@leonsilicon.com"
-  },
-  "files": [
-    "dist",
-    "src/types"
-  ],
-  "type": "module",
-  "scripts": {
-    "build": "tsdown",
-    "type-check": "tsc --noEmit",
-    "lint": "lintroll",
-    "prepublishOnly": "npm run build"
-  },
-  "exports": {
-    "./package.json": "./package.json",
-    "./types": {
-      "types": "./src/types/index.d.ts",
-      "default": "./src/types/index.d.ts"
-    },
-    "./plugin": {
-      "import": {
-        "types": "./dist/plugin/index.d.mts",
-        "default": "./dist/plugin/index.mjs"
-      },
-      "require": {
-        "types": "./dist/plugin/index.d.cts",
-        "default": "./dist/plugin/index.cjs"
-      }
-    },
-    "./runtime": {
-      "import": {
-        "types": "./dist/runtime/index.d.ts",
-        "default": "./dist/runtime/index.js"
-      },
-      "require": {
-        "types": "./dist/runtime/index.d.cts",
-        "default": "./dist/runtime/index.cjs"
-      }
-    }
-  },
-  "typesVersions": {
-    "*": {
-      "types": ["./src/types/index.d.ts"],
-      "plugin": ["./dist/plugin/index.d.mts"],
-      "runtime": ["./dist/runtime/index.d.ts"]
-    }
-  },
-  "engines": {
-    "node": ">=18.19.0"
-  },
-  "peerDependencies": {
-    "@babel/core": "^7.10.0",
-    "@types/babel__core": "^7.20.5"
-  },
-  "peerDependenciesMeta": {
-    "@babel/core": {
-      "optional": true
-    },
-    "@types/babel__core": {
-      "optional": true
-    }
-  },
-  "devDependencies": {
-    "@babel/core": "^7.29.0",
-    "@types/babel__core": "^7.20.5",
-    "@types/node": "^22.15.29",
-    "clean-pkg-json": "^1.2.0",
-    "lintroll": "^1.8.1",
-    "tsdown": "^0.22.0",
-    "typescript": "^5.5.2"
-  },
-  "packageManager": "pnpm@11.1.2"
+	"name": "im.console",
+	"version": "0.2.0",
+	"description": "import.meta.console — console.* with file:line:col baked into every call",
+	"keywords": [
+		"babel-plugin",
+		"console",
+		"import.meta",
+		"logger",
+		"react-native"
+	],
+	"license": "MIT",
+	"author": {
+		"name": "Leon Si",
+		"email": "leon@leonsilicon.com"
+	},
+	"repository": "leonsilicon/im.console",
+	"files": [
+		"dist",
+		"src/types"
+	],
+	"type": "module",
+	"typesVersions": {
+		"*": {
+			"types": [
+				"./src/types/index.d.ts"
+			],
+			"plugin": [
+				"./dist/plugin/index.d.mts"
+			],
+			"runtime": [
+				"./dist/runtime/index.d.ts"
+			],
+			"bun": [
+				"./dist/bun/index.d.mts"
+			],
+			"bun/preload": [
+				"./dist/bun/preload.d.mts"
+			]
+		}
+	},
+	"exports": {
+		"./package.json": "./package.json",
+		"./types": {
+			"types": "./src/types/index.d.ts",
+			"default": "./src/types/index.d.ts"
+		},
+		"./plugin": {
+			"import": {
+				"types": "./dist/plugin/index.d.mts",
+				"default": "./dist/plugin/index.mjs"
+			},
+			"require": {
+				"types": "./dist/plugin/index.d.cts",
+				"default": "./dist/plugin/index.cjs"
+			}
+		},
+		"./runtime": {
+			"import": {
+				"types": "./dist/runtime/index.d.ts",
+				"default": "./dist/runtime/index.js"
+			},
+			"require": {
+				"types": "./dist/runtime/index.d.cts",
+				"default": "./dist/runtime/index.cjs"
+			}
+		},
+		"./bun": {
+			"import": {
+				"types": "./dist/bun/index.d.mts",
+				"default": "./dist/bun/index.mjs"
+			}
+		},
+		"./bun/preload": {
+			"import": {
+				"types": "./dist/bun/preload.d.mts",
+				"default": "./dist/bun/preload.mjs"
+			}
+		}
+	},
+	"scripts": {
+		"build": "vp pack",
+		"test": "vp test run",
+		"type-check": "tsc --noEmit",
+		"lint": "vp lint",
+		"format": "vp format",
+		"check": "vp check",
+		"prepublishOnly": "npm run build"
+	},
+	"devDependencies": {
+		"@babel/core": "^7.29.0",
+		"@babel/types": "^7.29.7",
+		"@types/babel__core": "^7.20.5",
+		"@types/bun": "^1.3.14",
+		"@types/node": "^22.15.29",
+		"clean-pkg-json": "^1.2.0",
+		"typescript": "^5.5.2",
+		"vite-plus": "catalog:"
+	},
+	"peerDependencies": {
+		"@babel/core": "^7.10.0",
+		"@types/babel__core": "^7.20.5"
+	},
+	"peerDependenciesMeta": {
+		"@babel/core": {
+			"optional": true
+		},
+		"@types/babel__core": {
+			"optional": true
+		}
+	},
+	"engines": {
+		"node": ">=18.19.0"
+	},
+	"packageManager": "pnpm@11.1.2"
 }

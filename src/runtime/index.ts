@@ -30,19 +30,19 @@
 type AnyConsole = Record<string, ((...args: unknown[]) => void) | undefined>;
 
 const PASS_THROUGH = new Set<string>([
-	'clear',
-	'groupEnd',
-	'time',
-	'timeEnd',
-	'timeLog',
-	'count',
-	'countReset',
-	'dir',
-	'dirxml',
-	'table',
-	'profile',
-	'profileEnd',
-	'timeStamp',
+	"clear",
+	"groupEnd",
+	"time",
+	"timeEnd",
+	"timeLog",
+	"count",
+	"countReset",
+	"dir",
+	"dirxml",
+	"table",
+	"profile",
+	"profileEnd",
+	"timeStamp",
 ]);
 
 const callConsole = (method: string, args: readonly unknown[]): void => {
@@ -65,7 +65,7 @@ const prefixed = (method: string, args: readonly unknown[], location: string): v
 		return;
 	}
 	const [first, ...rest] = args;
-	if (typeof first === 'string') {
+	if (typeof first === "string") {
 		fn.call(console, `${location} ${first}`, ...rest);
 	} else {
 		fn.call(console, location, first, ...rest);
@@ -88,7 +88,7 @@ const assertWithLocation = (args: readonly unknown[], location: string): void =>
 		return;
 	}
 	const [first, ...tail] = rest;
-	if (typeof first === 'string') {
+	if (typeof first === "string") {
 		fn.call(console, condition, `${location} ${first}`, ...tail);
 	} else {
 		fn.call(console, condition, location, first, ...tail);
@@ -112,7 +112,7 @@ export const __imConsole = (
 		return;
 	}
 	const location = `[${filename}:${line}:${column}]`;
-	if (method === 'assert') {
+	if (method === "assert") {
 		assertWithLocation(args, location);
 		return;
 	}
@@ -150,11 +150,11 @@ export const __imConsoleBindObject = (
 	column: number,
 ): ((...args: unknown[]) => void) & Record<string, (...args: unknown[]) => void> => {
 	const fn = ((...args: unknown[]): void => {
-		__imConsole(filename, line, column, 'log', ...args);
+		__imConsole(filename, line, column, "log", ...args);
 	}) as ((...args: unknown[]) => void) & Record<string, (...args: unknown[]) => void>;
 	return new Proxy(fn, {
 		get(target, prop): unknown {
-			if (typeof prop !== 'string') {
+			if (typeof prop !== "string") {
 				return Reflect.get(target, prop);
 			}
 			return (...args: unknown[]): void => {

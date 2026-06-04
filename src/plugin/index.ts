@@ -27,13 +27,13 @@
  *   Net effect: non-matching files cost one `String.includes` per file;
  *   matching files run the original transform exactly once.
  */
-import { basename } from 'node:path';
-import type { NodePath, PluginObj, PluginPass } from '@babel/core';
-import type * as BabelTypes from '@babel/types';
+import { basename } from "node:path";
+import type { NodePath, PluginObj, PluginPass } from "@babel/core";
+import type * as BabelTypes from "@babel/types";
 
 export type PluginOptions = {
 	/** Module format to emit. Defaults to `'esm'`. */
-	module?: 'esm' | 'cjs';
+	module?: "esm" | "cjs";
 
 	/** Module specifier for the runtime. Defaults to `'im.console/runtime'`. */
 	runtimeSpecifier?: string;
@@ -43,16 +43,16 @@ export type PluginOptions = {
 	filename?: string;
 };
 
-const DEFAULT_RUNTIME = 'im.console/runtime';
-const RUNTIME_LOCAL_HINT = '_imConsoleRuntime';
-const NEEDLE = 'import.meta.console';
+const DEFAULT_RUNTIME = "im.console/runtime";
+const RUNTIME_LOCAL_HINT = "_imConsoleRuntime";
+const NEEDLE = "import.meta.console";
 
 const resolveFilename = (state: PluginPass, override: string | undefined): string | undefined => {
-	if (override !== undefined && override !== '') {
+	if (override !== undefined && override !== "") {
 		return override;
 	}
 	const { filename } = state;
-	if (filename === undefined || filename === '') {
+	if (filename === undefined || filename === "") {
 		return;
 	}
 	return basename(filename);
@@ -61,18 +61,14 @@ const resolveFilename = (state: PluginPass, override: string | undefined): strin
 type BabelApi = { types: typeof BabelTypes };
 
 const isImportMetaConsole = (node: BabelTypes.Node): boolean => {
-	if (node.type !== 'MemberExpression' && node.type !== 'OptionalMemberExpression') {
+	if (node.type !== "MemberExpression" && node.type !== "OptionalMemberExpression") {
 		return false;
 	}
-	if (node.computed || node.property.type !== 'Identifier' || node.property.name !== 'console') {
+	if (node.computed || node.property.type !== "Identifier" || node.property.name !== "console") {
 		return false;
 	}
 	const obj = node.object;
-	return (
-		obj.type === 'MetaProperty'
-		&& obj.meta.name === 'import'
-		&& obj.property.name === 'meta'
-	);
+	return obj.type === "MetaProperty" && obj.meta.name === "import" && obj.property.name === "meta";
 };
 
 /** Returns the console method name being called (`'log'`, `'warn'`, etc.),
@@ -80,13 +76,13 @@ const isImportMetaConsole = (node: BabelTypes.Node): boolean => {
  * callable shorthand `import.meta.console(...)` returns `'log'`. */
 const classifyMethod = (callee: BabelTypes.Node): string | undefined => {
 	if (isImportMetaConsole(callee)) {
-		return 'log';
+		return "log";
 	}
 	if (
-		(callee.type !== 'MemberExpression' && callee.type !== 'OptionalMemberExpression')
-		|| callee.computed
-		|| callee.property.type !== 'Identifier'
-		|| !isImportMetaConsole(callee.object)
+		(callee.type !== "MemberExpression" && callee.type !== "OptionalMemberExpression") ||
+		callee.computed ||
+		callee.property.type !== "Identifier" ||
+		!isImportMetaConsole(callee.object)
 	) {
 		return;
 	}
@@ -94,14 +90,14 @@ const classifyMethod = (callee: BabelTypes.Node): string | undefined => {
 };
 
 const plugin = ({ types: t }: BabelApi): PluginObj<PluginPass> => ({
-	name: 'transform-import-meta-console',
+	name: "transform-import-meta-console",
 
 	visitor: {
 		Program(programPath, state): void {
 			// Cheap substring check on the raw source — bail out before
 			// touching the AST for files that don't reference the needle.
 			const source = state.file.code;
-			if (typeof source !== 'string' || !source.includes(NEEDLE)) {
+			if (typeof source !== "string" || !source.includes(NEEDLE)) {
 				return;
 			}
 
@@ -122,8 +118,7 @@ const plugin = ({ types: t }: BabelApi): PluginObj<PluginPass> => ({
 			};
 
 			const rewriteCall = (
-				callPath: NodePath<BabelTypes.CallExpression>
-					| NodePath<BabelTypes.OptionalCallExpression>,
+				callPath: NodePath<BabelTypes.CallExpression> | NodePath<BabelTypes.OptionalCallExpression>,
 			): void => {
 				const { node } = callPath;
 				const method = classifyMethod(node.callee);
@@ -138,33 +133,28 @@ const plugin = ({ types: t }: BabelApi): PluginObj<PluginPass> => ({
 				const local = ensureRuntimeLocal();
 
 				callPath.replaceWith(
-					t.callExpression(
-						t.memberExpression(
-							t.identifier(local),
-							t.identifier('__imConsole'),
-						),
-						[
-							t.stringLiteral(filename),
-							t.numericLiteral(loc.start.line),
-							t.numericLiteral(loc.start.column + 1),
-							t.stringLiteral(method),
-							...node.arguments,
-						],
-					),
+					t.callExpression(t.memberExpression(t.identifier(local), t.identifier("__imConsole")), [
+						t.stringLiteral(filename),
+						t.numericLiteral(loc.start.line),
+						t.numericLiteral(loc.start.column + 1),
+						t.stringLiteral(method),
+						...node.arguments,
+					]),
 				);
 				matched = true;
 			};
 
 			const rewriteValue = (
-				memberPath: NodePath<BabelTypes.MemberExpression>
+				memberPath:
+					| NodePath<BabelTypes.MemberExpression>
 					| NodePath<BabelTypes.OptionalMemberExpression>,
 			): void => {
 				const { node } = memberPath;
 				// `import.meta.console.<method>` as a value — emit __imConsoleBind.
 				if (
-					!node.computed
-					&& node.property.type === 'Identifier'
-					&& isImportMetaConsole(node.object)
+					!node.computed &&
+					node.property.type === "Identifier" &&
+					isImportMetaConsole(node.object)
 				) {
 					const { loc } = node;
 					if (!loc) {
@@ -173,10 +163,7 @@ const plugin = ({ types: t }: BabelApi): PluginObj<PluginPass> => ({
 					const local = ensureRuntimeLocal();
 					memberPath.replaceWith(
 						t.callExpression(
-							t.memberExpression(
-								t.identifier(local),
-								t.identifier('__imConsoleBind'),
-							),
+							t.memberExpression(t.identifier(local), t.identifier("__imConsoleBind")),
 							[
 								t.stringLiteral(filename),
 								t.numericLiteral(loc.start.line),
@@ -197,10 +184,7 @@ const plugin = ({ types: t }: BabelApi): PluginObj<PluginPass> => ({
 					const local = ensureRuntimeLocal();
 					memberPath.replaceWith(
 						t.callExpression(
-							t.memberExpression(
-								t.identifier(local),
-								t.identifier('__imConsoleBindObject'),
-							),
+							t.memberExpression(t.identifier(local), t.identifier("__imConsoleBindObject")),
 							[
 								t.stringLiteral(filename),
 								t.numericLiteral(loc.start.line),
@@ -239,22 +223,20 @@ const plugin = ({ types: t }: BabelApi): PluginObj<PluginPass> => ({
 				return;
 			}
 
-			const moduleType = options.module ?? 'esm';
+			const moduleType = options.module ?? "esm";
 			const specifier = options.runtimeSpecifier ?? DEFAULT_RUNTIME;
 			const localId = t.identifier(runtimeLocal);
 			const specifierLiteral = t.stringLiteral(specifier);
-			const declaration = moduleType === 'cjs'
-				? t.variableDeclaration('var', [
-					t.variableDeclarator(
-						localId,
-						t.callExpression(t.identifier('require'), [specifierLiteral]),
-					),
-				])
-				: t.importDeclaration(
-					[t.importNamespaceSpecifier(localId)],
-					specifierLiteral,
-				);
-			programPath.unshiftContainer('body', declaration);
+			const declaration =
+				moduleType === "cjs"
+					? t.variableDeclaration("var", [
+							t.variableDeclarator(
+								localId,
+								t.callExpression(t.identifier("require"), [specifierLiteral]),
+							),
+						])
+					: t.importDeclaration([t.importNamespaceSpecifier(localId)], specifierLiteral);
+			programPath.unshiftContainer("body", declaration);
 		},
 	},
 });

@@ -5,6 +5,8 @@
 
 		"module": "preserve",
 		"resolveJsonModule": true,
+		"allowImportingTsExtensions": true,
+		"types": ["bun", "node"],
 		"allowJs": true,
 		"strict": true,
 		// "noUncheckedIndexedAccess": true,
@@ -12,6 +14,6 @@
 		"noEmit": true,
 		"esModuleInterop": true,
 		"verbatimModuleSyntax": true,
-		"skipLibCheck": true,
-	},
+		"skipLibCheck": true
+	}
 }

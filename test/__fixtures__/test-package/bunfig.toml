@@ -1,0 +1,5 @@
+# This is the exact form documented in the README. `im.console/bun/preload`
+# resolves through this fixture's `workspace:*` dependency on the package at the
+# repo root, so a plain `bun entry.ts` (no --preload flag) transforms the whole
+# module graph.
+preload = ["im.console/bun/preload"]

@@ -1,0 +1,24 @@
+packages:
+  - .
+  - test/__fixtures__/test-package
+# pnpm 11's pre-run dependency check spawns a bare `pnpm` binary, which isn't on
+# PATH when pnpm is provided via corepack. Disable it; deps are installed
+# explicitly.
+verifyDepsBeforeRun: false
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+catalog:
+  vite: npm:@voidzero-dev/vite-plus-core@latest
+  vitest: npm:@voidzero-dev/vite-plus-test@latest
+  vite-plus: latest
+overrides:
+  vite: "catalog:"
+  vitest: "catalog:"
+peerDependencyRules:
+  allowAny:
+    - vite
+    - vitest
+  allowedVersions:
+    vite: "*"
+    vitest: "*"

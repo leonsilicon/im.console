@@ -4,9 +4,9 @@
 basename plus the call-site line:col baked in at build time.
 
 ```ts
-import.meta.console.log('hello', user)
-import.meta.console.warn('cache miss for', key)
-import.meta.console.error('boom', error)
+import.meta.console.log("hello", user);
+import.meta.console.warn("cache miss for", key);
+import.meta.console.error("boom", error);
 ```
 
 becomes
@@ -23,16 +23,16 @@ becomes
 directly callable as a shorthand for `.log`:
 
 ```ts
-import.meta.console('quick log')   // → console.log('[file.ts:1:1] quick log')
+import.meta.console("quick log"); // → console.log('[file.ts:1:1] quick log')
 ```
 
 You can also capture a reference and call it later. The location prefix is
 baked in where the reference is taken, not where it's called:
 
 ```ts
-const logger = import.meta.console.warn   // location captured here
-const c      = import.meta.console        // ditto — `c.error(...)` uses this line
-arr.forEach(import.meta.console.log)
+const logger = import.meta.console.warn; // location captured here
+const c = import.meta.console; // ditto — `c.error(...)` uses this line
+arr.forEach(import.meta.console.log);
 ```
 
 `import.meta.console.*` is non-optional by design — the babel plugin must be
@@ -52,8 +52,8 @@ Add the Babel plugin:
 ```js
 // babel.config.js
 module.exports = {
-  presets: ['babel-preset-expo'],
-  plugins: ['im.console/plugin'],
+	presets: ["babel-preset-expo"],
+	plugins: ["im.console/plugin"],
 };
 ```
 
@@ -64,13 +64,62 @@ into a call to the small `im.console/runtime` module, which forwards to
 ### Options
 
 ```js
-['im.console/plugin', {
-  // 'esm' (default) or 'cjs' — controls how the runtime is imported.
-  module: 'esm',
-  // Override the runtime specifier (rarely needed).
-  runtimeSpecifier: 'im.console/runtime',
-}]
+[
+	"im.console/plugin",
+	{
+		// 'esm' (default) or 'cjs' — controls how the runtime is imported.
+		module: "esm",
+		// Override the runtime specifier (rarely needed).
+		runtimeSpecifier: "im.console/runtime",
+	},
+];
 ```
+
+### Bun
+
+If you run your code directly with Bun (`bun file.ts`), you don't need a
+separate Babel build step — `im.console/bun` is a Bun plugin that applies the
+same transform on the fly, as each module is loaded.
+
+The recommended wiring is `bunfig.toml`, which makes a plain `bun file.ts`
+(no `--preload` flag) Just Work, including for every file `file.ts` imports:
+
+```toml
+# bunfig.toml
+preload = ["im.console/bun/preload"]
+```
+
+`im.console/bun/preload` registers the plugin with default options. For custom
+options, write your own preload module instead:
+
+```ts
+// im-console-preload.ts
+import { imConsolePlugin } from "im.console/bun";
+
+Bun.plugin(
+	imConsolePlugin({
+		// Override the runtime specifier (rarely needed).
+		runtimeSpecifier: "im.console/runtime",
+		// Restrict which files are transformed (default: all JS/TS source files).
+		filter: /\.[cm]?[jt]sx?$/,
+	}),
+);
+```
+
+```toml
+# bunfig.toml
+preload = ["./im-console-preload.ts"]
+```
+
+You can also pass it on the command line instead of via `bunfig.toml`:
+
+```sh
+bun --preload ./im-console-preload.ts file.ts
+```
+
+Either way the transform reaches the whole module graph — the entry file _and_
+every file it imports — because Bun runs preload plugins' `onLoad` hooks for
+every module it loads.
 
 ### TypeScript
 

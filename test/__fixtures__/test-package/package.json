@@ -1,0 +1,9 @@
+{
+	"name": "im.console-test-package",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"im.console": "workspace:*"
+	}
+}

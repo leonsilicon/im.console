@@ -74,8 +74,30 @@ export type BunPluginOptions = {
 	filter?: RegExp;
 };
 
-const DEFAULT_FILTER = /\.[cm]?[jt]sx?$/;
+// Match JS/TS source files but never anything under `node_modules`.
+//
+// This exclusion is load-bearing: Bun (≥1.3, see oven-sh/bun#5044) mis-detects a
+// CommonJS module as ESM whenever an `onLoad` hook returns `contents` for it,
+// producing errors like `SyntaxError: Missing 'default' export in module ...`.
+// We can't dodge that by returning `undefined` from the hook either — for a
+// global plugin registered via `preload`, Bun treats an `undefined` return as a
+// failed module mock and throws `Expected module mock to return an object`.
+//
+// Since the hook is forced to return `contents` for every file it matches, the
+// only safe move is to never match the files we don't transform. Virtually all
+// CommonJS in a real project lives in `node_modules`, so excluding it lets Bun
+// load dependencies natively while we still transform first-party source.
+const DEFAULT_FILTER = /^(?:(?!node_modules).)*\.[cm]?[jt]sx?$/;
 const NEEDLE = "import.meta.console";
+
+// Heuristic CommonJS detector for first-party files. A source file that uses
+// `module.exports`/`exports.foo` and has no top-level `import`/`export` would be
+// broken by the bun#5044 bug if we re-emitted its contents, so we leave it
+// alone. (It also can't contain `import.meta.console`, so there is nothing to
+// transform.)
+const looksLikeCjs = (source: string): boolean =>
+	/\bmodule\.exports\b|(?:^|[^.\w$])exports\.[\w$]/.test(source) &&
+	!/^\s*(?:import|export)\b/m.test(source);
 
 /** Map a file extension to the Bun loader that should parse the transform
  *  output. Babel strips TS/JSX syntax, but keeping the matching loader is
@@ -124,18 +146,38 @@ export const imConsolePlugin = (options: BunPluginOptions = {}): BunPlugin => {
 		setup(build): void {
 			warmBabel();
 			build.onLoad({ filter }, async ({ path }) => {
+				// Defensive guard for a custom `filter` that doesn't exclude
+				// dependencies: never re-emit anything under `node_modules`, so
+				// Bun loads them natively and the bun#5044 CJS breakage can't
+				// reach third-party code. Returning `undefined` is fine here —
+				// dependency files never hold the needle, so this is the same
+				// no-op path as a non-needle bail-out.
+				if (path.includes("/node_modules/")) {
+					return undefined;
+				}
+
 				const source = await Bun.file(path).text();
 
-				// Cheap bail-out: skip Babel entirely for files that can't
-				// possibly contain the needle.
+				// Bail-out for files that can't contain the needle. We can't
+				// `return undefined` here: for a global plugin registered via
+				// `preload`, Bun treats an `undefined` return as a failed module
+				// mock and throws "Expected module mock to return an object". So
+				// instead we re-emit the untouched source with the matching
+				// loader and let Bun parse it.
 				//
-				// We can't `return undefined` here: a global plugin registered
-				// via `preload` runs for the whole module graph, and when its
-				// `onLoad` hook returns `undefined` Bun (≥1.3) treats it as a
-				// module-mock that produced nothing and throws "Expected module
-				// mock to return an object". Returning the untouched source with
-				// the matching loader lets Bun load the file normally.
+				// The one shape Bun mishandles is a CommonJS module re-emitted
+				// through `onLoad` (oven-sh/bun#5044 — it gets parsed as ESM and
+				// loses its exports). A CJS file can't hold `import.meta.console`
+				// anyway, so we skip re-emitting it: returning `undefined` for a
+				// non-needle CJS file is the lesser evil — it only triggers the
+				// "module mock" throw in the (rare) case of a first-party CJS
+				// source file, whereas re-emitting it would silently corrupt its
+				// exports. `node_modules` (where realistically all CJS lives) is
+				// already excluded by the default filter.
 				if (!source.includes(NEEDLE)) {
+					if (looksLikeCjs(source)) {
+						return undefined;
+					}
 					return {
 						contents: source,
 						loader: loaderFor(path),

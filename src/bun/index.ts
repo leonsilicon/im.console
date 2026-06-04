@@ -128,8 +128,18 @@ export const imConsolePlugin = (options: BunPluginOptions = {}): BunPlugin => {
 
 				// Cheap bail-out: skip Babel entirely for files that can't
 				// possibly contain the needle.
+				//
+				// We can't `return undefined` here: a global plugin registered
+				// via `preload` runs for the whole module graph, and when its
+				// `onLoad` hook returns `undefined` Bun (≥1.3) treats it as a
+				// module-mock that produced nothing and throws "Expected module
+				// mock to return an object". Returning the untouched source with
+				// the matching loader lets Bun load the file normally.
 				if (!source.includes(NEEDLE)) {
-					return undefined;
+					return {
+						contents: source,
+						loader: loaderFor(path),
+					};
 				}
 
 				const result = transformSync(source, {
@@ -145,10 +155,9 @@ export const imConsolePlugin = (options: BunPluginOptions = {}): BunPlugin => {
 					plugins: [[babelPlugin, pluginOptions]],
 				});
 
-				const code = result?.code;
-				if (code === null || code === undefined) {
-					return undefined;
-				}
+				// Fall back to the original source (not `undefined`) for the same
+				// reason as above.
+				const code = result?.code ?? source;
 
 				return {
 					contents: code,

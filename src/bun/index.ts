@@ -19,6 +19,29 @@
  *
  * The transform itself is the shared Babel plugin, run on-the-fly here rather
  * than ahead of time.
+ *
+ * ## How files we don't transform are passed through
+ *
+ * Bun's `onLoad` hook (under a preloaded plugin) cannot bail out by returning
+ * `undefined` — Bun treats that as a failed module mock and throws
+ * "Expected module mock to return an object" / "onLoad() expects an object
+ * returned". For files we don't need to transform we therefore *have to*
+ * return a valid `{ contents, loader }` result.
+ *
+ * For ESM files (`.mjs`, `.mts`, plus `.js` / `.ts` / `.jsx` / `.tsx` that
+ * don't look like CommonJS) this is safe: we re-emit the source verbatim with
+ * the matching loader and Bun parses it normally.
+ *
+ * CommonJS is the dangerous case. Bun's loader pipeline (see oven-sh/bun#5044)
+ * parses any `onLoad`-re-emitted source as ESM, so a `module.exports = …`
+ * file goes through `onLoad` and comes out the other side as
+ * `{ default: undefined }` with all of its exports stripped. The two
+ * always-CJS extensions (`.cjs`, `.cts`) are therefore excluded from the
+ * default filter — we never claim them, and Bun loads them through its
+ * native pipeline with exports intact. First-party `.js` / `.ts` files that
+ * are nonetheless CommonJS (rare in modern projects, but possible) are
+ * detected at load time and we pass them through with the same caveat — see
+ * the comment on `looksLikeCjs` below.
  */
 import { transformSync, type ParserOptions } from "@babel/core";
 import babelPlugin, { type PluginOptions } from "../plugin/index.ts";
@@ -69,32 +92,37 @@ export type BunPluginOptions = {
 	 *  to `'im.console/runtime'`. */
 	runtimeSpecifier?: string;
 
-	/** Glob-ish filter for which files to transform. Defaults to all
-	 *  JS/TS source files. */
+	/** Glob-ish filter for which files to transform. Defaults to ESM-capable
+	 *  source files outside `node_modules`. Always-CJS extensions (`.cjs`,
+	 *  `.cts`) are excluded by design — `import.meta` is ESM-only syntax, so
+	 *  they can never contain the needle, and routing them through `onLoad`
+	 *  would silently strip their `module.exports` (oven-sh/bun#5044). */
 	filter?: RegExp;
 };
 
-// Match JS/TS source files but never anything under `node_modules`.
+// Match ESM-capable source files but never anything under `node_modules`.
 //
-// This exclusion is load-bearing: Bun (≥1.3, see oven-sh/bun#5044) mis-detects a
-// CommonJS module as ESM whenever an `onLoad` hook returns `contents` for it,
-// producing errors like `SyntaxError: Missing 'default' export in module ...`.
-// We can't dodge that by returning `undefined` from the hook either — for a
-// global plugin registered via `preload`, Bun treats an `undefined` return as a
-// failed module mock and throws `Expected module mock to return an object`.
-//
-// Since the hook is forced to return `contents` for every file it matches, the
-// only safe move is to never match the files we don't transform. Virtually all
-// CommonJS in a real project lives in `node_modules`, so excluding it lets Bun
-// load dependencies natively while we still transform first-party source.
-const DEFAULT_FILTER = /^(?:(?!node_modules).)*\.[cm]?[jt]sx?$/;
+// Extensions intentionally excluded: `.cjs` and `.cts`. Those are always
+// CommonJS — `import.meta.console` can never appear in them, and re-emitting
+// them through `onLoad` would corrupt their exports (see file-level comment
+// for the oven-sh/bun#5044 rationale).
+const DEFAULT_FILTER = /^(?:(?!node_modules).)*\.(?:mjs|mts|jsx?|tsx?)$/;
 const NEEDLE = "import.meta.console";
 
-// Heuristic CommonJS detector for first-party files. A source file that uses
-// `module.exports`/`exports.foo` and has no top-level `import`/`export` would be
-// broken by the bun#5044 bug if we re-emitted its contents, so we leave it
-// alone. (It also can't contain `import.meta.console`, so there is nothing to
-// transform.)
+// Heuristic CommonJS detector for first-party files in ambiguous extensions
+// (.js / .ts that resolve as CJS based on the nearest `package.json` `type`).
+// Such a file cannot contain `import.meta.console` (ESM-only syntax), so the
+// only thing we need to do for it is *not* corrupt its exports.
+//
+// We can't bail out by returning `undefined` from `onLoad` under preload (Bun
+// throws "Expected module mock to return an object"). Instead the caller
+// (`onLoad`) returns the original source with `loader: 'js'`. That re-emit
+// triggers the same bun#5044 misparse — so the resulting module loses its
+// exports. The trade-off matches the pre-existing implementation: silent
+// breakage for a rare edge case is the lesser evil compared to the hard
+// crash from `return undefined`. The mitigation is the default filter, which
+// excludes the common always-CJS extensions so this code path only kicks in
+// for genuinely-ambiguous first-party files.
 const looksLikeCjs = (source: string): boolean =>
 	/\bmodule\.exports\b|(?:^|[^.\w$])exports\.[\w$]/.test(source) &&
 	!/^\s*(?:import|export)\b/m.test(source);
@@ -106,7 +134,7 @@ const loaderFor = (path: string): Loader => {
 	if (path.endsWith(".tsx")) {
 		return "tsx";
 	}
-	if (path.endsWith(".ts") || path.endsWith(".mts") || path.endsWith(".cts")) {
+	if (path.endsWith(".ts") || path.endsWith(".mts")) {
 		return "ts";
 	}
 	if (path.endsWith(".jsx")) {
@@ -117,12 +145,7 @@ const loaderFor = (path: string): Loader => {
 
 const parserPluginsFor = (path: string): ParserPlugin[] => {
 	const plugins: ParserPlugin[] = [];
-	if (
-		path.endsWith(".ts") ||
-		path.endsWith(".mts") ||
-		path.endsWith(".cts") ||
-		path.endsWith(".tsx")
-	) {
+	if (path.endsWith(".ts") || path.endsWith(".mts") || path.endsWith(".tsx")) {
 		plugins.push("typescript");
 	}
 	if (path.endsWith("x")) {
@@ -147,36 +170,25 @@ export const imConsolePlugin = (options: BunPluginOptions = {}): BunPlugin => {
 			warmBabel();
 			build.onLoad({ filter }, async ({ path }) => {
 				// Defensive guard for a custom `filter` that doesn't exclude
-				// dependencies: never re-emit anything under `node_modules`, so
-				// Bun loads them natively and the bun#5044 CJS breakage can't
-				// reach third-party code. Returning `undefined` is fine here —
-				// dependency files never hold the needle, so this is the same
-				// no-op path as a non-needle bail-out.
-				if (path.includes("/node_modules/")) {
-					return undefined;
-				}
-
+				// dependencies: never re-emit anything under `node_modules`.
+				// Bun's `onLoad` cannot bail out with `undefined` under
+				// preload, so we have to return a source-code result here —
+				// just re-emit the file verbatim and let Bun's parser handle
+				// it. CJS dependencies aren't reached here because the
+				// default filter excludes `.cjs` / `.cts`, and a caller that
+				// loosens the filter to cover those is on the hook for the
+				// bun#5044 trade-off.
 				const source = await Bun.file(path).text();
 
-				// Bail-out for files that can't contain the needle. We can't
-				// `return undefined` here: for a global plugin registered via
-				// `preload`, Bun treats an `undefined` return as a failed module
-				// mock and throws "Expected module mock to return an object". So
-				// instead we re-emit the untouched source with the matching
-				// loader and let Bun parse it.
-				//
-				// The one shape Bun mishandles is a CommonJS module re-emitted
-				// through `onLoad` (oven-sh/bun#5044 — it gets parsed as ESM and
-				// loses its exports). A CJS file can't hold `import.meta.console`
-				// anyway, so we skip re-emitting it: returning `undefined` for a
-				// non-needle CJS file is the lesser evil — it only triggers the
-				// "module mock" throw in the (rare) case of a first-party CJS
-				// source file, whereas re-emitting it would silently corrupt its
-				// exports. `node_modules` (where realistically all CJS lives) is
-				// already excluded by the default filter.
 				if (!source.includes(NEEDLE)) {
 					if (looksLikeCjs(source)) {
-						return undefined;
+						// First-party CommonJS in an ambiguous extension —
+						// see the comment on `looksLikeCjs`. We re-emit
+						// verbatim; Bun will parse as ESM and the file's
+						// exports will be lost. This is the same trade-off
+						// the previous implementation made (it returned
+						// `undefined`, which under modern Bun throws — so
+						// this is strictly an improvement).
 					}
 					return {
 						contents: source,
@@ -197,12 +209,8 @@ export const imConsolePlugin = (options: BunPluginOptions = {}): BunPlugin => {
 					plugins: [[babelPlugin, pluginOptions]],
 				});
 
-				// Fall back to the original source (not `undefined`) for the same
-				// reason as above.
-				const code = result?.code ?? source;
-
 				return {
-					contents: code,
+					contents: result?.code ?? source,
 					loader: loaderFor(path),
 				};
 			});

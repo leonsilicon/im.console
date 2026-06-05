@@ -100,8 +100,11 @@ Bun.plugin(
 	imConsolePlugin({
 		// Override the runtime specifier (rarely needed).
 		runtimeSpecifier: "im.console/runtime",
-		// Restrict which files are transformed (default: all JS/TS source files).
-		filter: /\.[cm]?[jt]sx?$/,
+		// Restrict which files are transformed. The default matches all JS/TS
+		// source files outside `node_modules`; keep the `node_modules` exclusion
+		// in any custom filter, since re-emitting a CommonJS dependency through
+		// the plugin breaks its exports (oven-sh/bun#5044).
+		filter: /^(?:(?!node_modules).)*\.[cm]?[jt]sx?$/,
 	}),
 );
 ```

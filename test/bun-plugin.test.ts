@@ -38,7 +38,7 @@ describe("bun plugin", () => {
 		// stderr. The imported module's calls must be transformed — this is
 		// the core claim being tested.
 		expect(stdout).toContain("[greet.ts:4:2] hello world");
-		expect(stdout).toContain("[greet.ts:6:2] shorthand log");
+		expect(stdout).toContain("[greet.ts:6:2] secondary log");
 		expect(stderr).toContain("[greet.ts:5:2] be careful");
 
 		// The entry file itself is transformed too.

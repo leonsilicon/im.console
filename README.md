@@ -19,12 +19,8 @@ becomes
 
 `import.meta.console` mirrors the full `Console` interface
 (`log`/`warn`/`error`/`info`/`debug`/`trace`/`table`/`dir`/`group`/`groupEnd`/
-`time`/`timeEnd`/`timeLog`/`count`/`countReset`/`assert`/`clear`). It is also
-directly callable as a shorthand for `.log`:
-
-```ts
-import.meta.console("quick log"); // → console.log('[file.ts:1:1] quick log')
-```
+`time`/`timeEnd`/`timeLog`/`count`/`countReset`/`assert`/`clear`). It is not
+directly callable; use `import.meta.console.log(...)` for log calls.
 
 You can also capture a reference and call it later. The location prefix is
 baked in where the reference is taken, not where it's called:

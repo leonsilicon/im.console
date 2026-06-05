@@ -6,7 +6,6 @@
  * Supported shapes:
  *   import.meta.console.log('hello')
  *   import.meta.console.warn('oops')
- *   import.meta.console('hello')                 // shorthand for .log
  *   import.meta.console?.error('boom')           // optional chain
  *   import.meta.console.log?.('hello')           // optional call
  *
@@ -72,12 +71,8 @@ const isImportMetaConsole = (node: BabelTypes.Node): boolean => {
 };
 
 /** Returns the console method name being called (`'log'`, `'warn'`, etc.),
- * or `undefined` if the call site doesn't target `import.meta.console`. The
- * callable shorthand `import.meta.console(...)` returns `'log'`. */
+ * or `undefined` if the call site doesn't target `import.meta.console.<method>`. */
 const classifyMethod = (callee: BabelTypes.Node): string | undefined => {
-	if (isImportMetaConsole(callee)) {
-		return "log";
-	}
 	if (
 		(callee.type !== "MemberExpression" && callee.type !== "OptionalMemberExpression") ||
 		callee.computed ||
@@ -150,6 +145,13 @@ const plugin = ({ types: t }: BabelApi): PluginObj<PluginPass> => ({
 					| NodePath<BabelTypes.OptionalMemberExpression>,
 			): void => {
 				const { node } = memberPath;
+				if (
+					(memberPath.parent.type === "CallExpression" ||
+						memberPath.parent.type === "OptionalCallExpression") &&
+					memberPath.parent.callee === node
+				) {
+					return;
+				}
 				// `import.meta.console.<method>` as a value — emit __imConsoleBind.
 				if (
 					!node.computed &&

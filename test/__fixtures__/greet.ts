@@ -3,5 +3,5 @@
 export const greet = (name: string): void => {
 	import.meta.console.log("hello", name);
 	import.meta.console.warn("be careful");
-	import.meta.console("shorthand log");
+	import.meta.console.info("secondary log");
 };

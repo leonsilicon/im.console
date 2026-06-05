@@ -8,12 +8,10 @@
  * timeLog/count/countReset/assert/clear). The babel plugin rewrites every
  * call so the corresponding `console.*` invocation is prefixed with the
  * source file's basename plus the call site's line:col.
- *
- * It's also directly callable as shorthand for `import.meta.console.log`.
  */
 declare global {
 	interface ImportMeta {
-		readonly console: Console & ((...args: unknown[]) => void);
+		readonly console: Console;
 	}
 }
 

@@ -17,8 +17,13 @@
  *   import { imConsolePlugin } from 'im.console/bun';
  *   Bun.plugin(imConsolePlugin());
  *
- * The transform itself is the shared Babel plugin, run on-the-fly here rather
- * than ahead of time.
+ * The transform is a dependency-free hand-rolled scanner (`./transform.ts`),
+ * NOT Babel. The package therefore pulls in no runtime or peer dependencies:
+ * Bun exposes no AST API (`Bun.Transpiler` only strips types, and stripping
+ * shifts line numbers — corrupting the `[file:line:col]` prefix), so the
+ * scanner rewrites the original source by character offset. The richer
+ * Babel-based AOT transform still ships separately as `im.console/plugin` for
+ * build pipelines that already run Babel.
  *
  * ## How files we don't transform are passed through
  *
@@ -43,49 +48,13 @@
  * detected at load time and we pass them through with the same caveat — see
  * the comment on `looksLikeCjs` below.
  */
-import { transformSync, type ParserOptions } from "@babel/core";
-import babelPlugin, { type PluginOptions } from "../plugin/index.ts";
-
-// Element type of `parserOpts.plugins`, derived from Babel's own typings so we
-// don't take a direct dependency on `@babel/parser`.
-type ParserPlugin = NonNullable<ParserOptions["plugins"]>[number];
+import { transform } from "./transform.ts";
 
 // `BunPlugin` / `OnLoadResultObject` live in the global `Bun` namespace
 // (from `@types/bun`). Referencing them there avoids the dts bundler tripping
 // over named re-exports from the `'bun'` module.
 type BunPlugin = Bun.BunPlugin;
 type Loader = Bun.OnLoadResultSourceCode["loader"];
-
-// Babel lazily `require()`s some helpers (e.g. `@babel/helper-compilation-
-// targets`) the first time `transformSync` runs. Bun forbids a synchronous
-// `require()` of a not-yet-loaded module from inside an `onLoad` hook, so we
-// warm those modules' require caches up front — while we're still at the
-// (async-safe) top level — by running one throwaway transform.
-let warmed = false;
-const warmBabel = (): void => {
-	if (warmed) {
-		return;
-	}
-	warmed = true;
-	try {
-		transformSync("const _imConsoleWarmup = 1;", {
-			filename: "warmup.ts",
-			configFile: false,
-			babelrc: false,
-			browserslistConfigFile: false,
-			// Match the real transform so the same lazy requires (source-map
-			// generation helpers) are warmed.
-			sourceMaps: "inline",
-			parserOpts: {
-				sourceType: "module",
-				plugins: ["typescript"],
-			},
-		});
-	} catch {
-		// Best-effort: if the warmup itself fails, the real transform will
-		// surface the error with proper context.
-	}
-};
 
 export type BunPluginOptions = {
 	/** Module specifier the rewritten code imports the runtime from. Defaults
@@ -108,6 +77,7 @@ export type BunPluginOptions = {
 // for the oven-sh/bun#5044 rationale).
 const DEFAULT_FILTER = /^(?:(?!node_modules).)*\.(?:mjs|mts|jsx?|tsx?)$/;
 const NEEDLE = "import.meta.console";
+const DEFAULT_RUNTIME = "im.console/runtime";
 
 // Heuristic CommonJS detector for first-party files in ambiguous extensions
 // (.js / .ts that resolve as CJS based on the nearest `package.json` `type`).
@@ -128,8 +98,8 @@ const looksLikeCjs = (source: string): boolean =>
 	!/^\s*(?:import|export)\b/m.test(source);
 
 /** Map a file extension to the Bun loader that should parse the transform
- *  output. Babel strips TS/JSX syntax, but keeping the matching loader is
- *  harmless and future-proofs files that mix syntaxes. */
+ *  output. We only ever wrap expressions in calls, so the original TS/JSX
+ *  syntax is preserved and the matching loader must stay. */
 const loaderFor = (path: string): Loader => {
 	if (path.endsWith(".tsx")) {
 		return "tsx";
@@ -143,31 +113,13 @@ const loaderFor = (path: string): Loader => {
 	return "js";
 };
 
-const parserPluginsFor = (path: string): ParserPlugin[] => {
-	const plugins: ParserPlugin[] = [];
-	if (path.endsWith(".ts") || path.endsWith(".mts") || path.endsWith(".tsx")) {
-		plugins.push("typescript");
-	}
-	if (path.endsWith("x")) {
-		plugins.push("jsx");
-	}
-	return plugins;
-};
-
 export const imConsolePlugin = (options: BunPluginOptions = {}): BunPlugin => {
 	const filter = options.filter ?? DEFAULT_FILTER;
-	const pluginOptions: PluginOptions = {
-		// Bun always loads ESM, so emit an `import` for the runtime.
-		module: "esm",
-		...(options.runtimeSpecifier === undefined
-			? {}
-			: { runtimeSpecifier: options.runtimeSpecifier }),
-	};
+	const runtimeSpecifier = options.runtimeSpecifier ?? DEFAULT_RUNTIME;
 
 	return {
 		name: "im.console",
 		setup(build): void {
-			warmBabel();
 			build.onLoad({ filter }, async ({ path }) => {
 				// Defensive guard for a custom `filter` that doesn't exclude
 				// dependencies: never re-emit anything under `node_modules`.
@@ -179,6 +131,7 @@ export const imConsolePlugin = (options: BunPluginOptions = {}): BunPlugin => {
 				// loosens the filter to cover those is on the hook for the
 				// bun#5044 trade-off.
 				const source = await Bun.file(path).text();
+				const loader = loaderFor(path);
 
 				if (!source.includes(NEEDLE)) {
 					if (looksLikeCjs(source)) {
@@ -186,36 +139,29 @@ export const imConsolePlugin = (options: BunPluginOptions = {}): BunPlugin => {
 						// see the comment on `looksLikeCjs`. We re-emit
 						// verbatim; Bun will parse as ESM and the file's
 						// exports will be lost. This is the same trade-off
-						// the previous implementation made (it returned
-						// `undefined`, which under modern Bun throws — so
-						// this is strictly an improvement).
+						// the previous implementation made.
 					}
-					return {
-						contents: source,
-						loader: loaderFor(path),
-					};
+					return { contents: source, loader };
 				}
 
-				const result = transformSync(source, {
-					filename: path,
-					configFile: false,
-					babelrc: false,
-					browserslistConfigFile: false,
-					sourceMaps: "inline",
-					parserOpts: {
-						sourceType: "module",
-						plugins: parserPluginsFor(path),
-					},
-					plugins: [[babelPlugin, pluginOptions]],
+				// Bun always loads ESM, so emit an `import` for the runtime.
+				const transformed = transform(source, {
+					filename: basename(path),
+					runtimeSpecifier,
+					module: "esm",
 				});
 
-				return {
-					contents: result?.code ?? source,
-					loader: loaderFor(path),
-				};
+				return { contents: transformed ?? source, loader };
 			});
 		},
 	};
+};
+
+/** Last path segment, dependency-free (avoids `node:path` so the Bun plugin
+ *  stays import-light). Handles both `/` and `\` separators. */
+const basename = (path: string): string => {
+	const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+	return slash === -1 ? path : path.slice(slash + 1);
 };
 
 export default imConsolePlugin;
